@@ -20,10 +20,15 @@ plan file if it's not visible in this session; it's not checked into the repo.
   direction flown. Still-air range is a circle of radius `R = glideRatio * heightAGL`
   around the event point. Wind translates every point on that circle by `wind * t` — so
   the reachable set is **a circle of radius R, centered at the event point shifted
-  downwind by `windSpeed * t`**, not an ellipse. Implemented in `src/lib/glide.ts`.
+  downwind by `windSpeed * t`**, not an ellipse. Implemented in `src/lib/glide.ts`. This
+  circle is still a flat 2D model — it doesn't account for the landing point's own elevation
+  or terrain in between; that's what the terrain-clearance check below adds for a *specific*
+  candidate landing point, on top of (not instead of) the circle.
 - **Terrain clearance**: sample terrain height along the direct ground track from event to
   landing point, compare against the assumed constant-gradient glide path (`1/glideRatio`),
-  flag if terrain pokes above it. Implemented in `src/lib/terrainProfile.ts`.
+  flag if terrain pokes above it. Split across two files: `sampleTerrainProfile` in
+  `src/lib/terrain.ts` (Cesium-dependent sampling) produces the profile,
+  `checkTerrainClearance` in `src/lib/terrainProfile.ts` (pure, unit-tested) evaluates it.
 - **Approach plan**: classic power-off High Key (overhead landing point, default 1500 ft
   AGL) / Low Key (abeam threshold, default 800 ft AGL) / base / final. Landing heading
   defaults to into-wind, editable. Implemented in `src/lib/approach.ts`.
@@ -47,9 +52,11 @@ rendering) belongs in `src/hooks` and `src/components`.
 
 ```
 src/
-  components/   CesiumMap, ParametersPanel, LandingInfoPanel, ApproachOverlay, SummaryPanel, Legend
-  lib/          glide.ts, approach.ts, terrainProfile.ts, geo-constants.ts  (pure, tested)
-  hooks/        useTerrainElevation.ts, useReachability.ts                  (Cesium-aware glue)
+  components/   CesiumMap, EventPointPanel, ParametersPanel, LandingInfoPanel, WindIndicator
+                (ApproachOverlay, SummaryPanel, Legend — Phase 4/5, not built yet)
+  lib/          glide.ts, terrainProfile.ts, geo-constants.ts, units.ts     (pure, tested)
+                terrain.ts, cesiumIonSetup.ts                              (Cesium-dependent glue)
+                (approach.ts — Phase 4, not built yet)
   types/        domain.ts
 ```
 
@@ -77,16 +84,29 @@ is ever renamed, update `base` there to match.
 
 - [x] Phase 0 — scaffolding (Vite/React/TS, Cesium/Resium/Turf/Vitest installed, lint/test/
       build wired, GitHub Actions CI + Pages deploy workflows, ion token configured)
-- [x] Phase 1 — 3D map + event point selection. `CesiumMap` (globe flown to Israel on load,
-      click-to-place via `scene.globe.pick`), `EventPointPanel` (altitude input, ground
-      elevation via `sampleGroundElevationFt`/`sampleTerrainMostDetailed`), wired in `App.tsx`.
-      Verified in a real browser (Playwright): click places the marker at correct lat/lon,
-      terrain elevation resolves, no console errors.
-- [x] Phase 2 — glide parameters + reachability circle. `ParametersPanel` (glide ratio, best
-      glide speed, wind speed/direction), `computeReachabilityCircle` in `src/lib/glide.ts`
-      (unit-tested in `glide.test.ts`), rendered as a cyan wind-shifted circle + yellow
-      still-air reference circle, both `HeightReference.CLAMP_TO_GROUND`.
-- [ ] Phase 3 — landing site selection + feasibility + terrain clearance
+- [x] Phase 1 — 3D map + event point selection. `CesiumMap` (globe flown to a default view on
+      load, click-to-place via `scene.globe.pick`), `EventPointPanel` (altitude + heading
+      inputs, ground elevation via `sampleGroundElevationFt`/`sampleTerrainMostDetailed`),
+      wired in `App.tsx`. The event point renders as a top-down Cessna 172 PNG icon
+      (`public/aircraft-icon.png`, user-supplied artwork) via `BillboardGraphics`, rotated to
+      `eventPoint.headingDeg`. Interaction model: the *first* map click places the event
+      point, the *second* places the landing point; after that, plain clicks are no-ops and
+      repositioning happens by **dragging** the marker itself (or the small white heading
+      handle, which sets heading by dragging — see `CesiumMap`'s generic drag support below).
+      Verified in a real browser (Playwright): placement, both drags, and typing a heading
+      directly all update state correctly, no console errors.
+- [x] Phase 2 — glide parameters + reachability circle. `ParametersPanel` (glide ratio —
+      defaults to C172's ~1.5 NM/1,000 ft, best glide speed, wind speed/direction),
+      `computeReachabilityCircle` in `src/lib/glide.ts` (unit-tested in `glide.test.ts`),
+      rendered as a cyan wind-shifted circle + yellow still-air reference circle, both
+      `HeightReference.CLAMP_TO_GROUND`. Wind also drives `WindIndicator`, a fixed top-left
+      screen-space (not geo-anchored) reference widget — a white comet-shaped arrow rotated
+      via CSS `transform: rotate()`, wind speed/direction printed on the shaft.
+- [x] Phase 3 — landing site selection + feasibility + terrain clearance. `LandingInfoPanel`
+      (distance/bearing, in-range margin via `checkReachability`, terrain clearance via
+      `checkTerrainClearance`), landing marker + event↔landing connector line color-coded
+      green (reachable and clear) or orange (either check fails). Same click-then-drag
+      interaction model as the event point.
 - [ ] Phase 4 — approach plan overlay
 - [ ] Phase 5 — polish
 
@@ -117,6 +137,35 @@ is ever renamed, update `base` there to match.
   live site serves the raw unbuilt `index.html` (references `/src/main.tsx`, 404s in the
   console), check Settings → Pages → Build and deployment → Source. Changing that dropdown
   does not itself trigger a redeploy — push a commit (or re-run the workflow) afterwards.
+- `viewer.scene.pick()` returns an `Entity` for **any** entity under the cursor, including
+  ones that never got an explicit `id` prop — Cesium auto-assigns a random UUID `.id` to
+  those. A drag-detection handler that treats "picked *any* entity" as "start a drag" will
+  misfire on decorative/non-interactive entities (here: the reachability circles and the
+  event↔landing connector line, which are mostly-filled and cover a lot of screen area) —
+  this silently ate every click meant to place a landing point inside the circle. Fix:
+  `CesiumMap` takes an explicit `draggableEntityIds: ReadonlySet<string>` prop and only
+  starts a drag when the picked id is in that set; everything else falls through to a plain
+  map click. Only entities that are meant to be draggable should get an explicit `id` at all.
+- A Cesium billboard `image` given as an SVG data URI needs explicit `width`/`height`
+  attributes on the root `<svg>` — a `viewBox` alone can rasterize to invalid/zero
+  dimensions, which then fails uploading as a WebGL texture (`texSubImage2D: bad image
+  data`, rendering as a solid black box instead of the icon). Ended up switching to a real
+  PNG (`public/aircraft-icon.png`) instead of an inline SVG, sidestepping this class of
+  issue entirely.
+- `BillboardGraphics` heading: `alignedAxis: Cartesian3.UNIT_Z` makes the billboard's "up"
+  point true north (regardless of camera orientation — more robust than `WindIndicator`'s
+  CSS-rotation approach, which assumes a north-up camera); combine with
+  `rotation: -CesiumMath.toRadians(headingDeg)` — **negated**, because Cesium's `rotation` is
+  counterclockwise while compass heading is clockwise (confirmed via Cesium's own doc
+  example: `alignedAxis = UNIT_Z; rotation = -PI_OVER_TWO` points the billboard east).
+- A UI handle positioned at a **fixed real-world distance** from a marker it's meant to be
+  visually/functionally distinct from is fragile — the heading-handle drag target sat only
+  800 ft from the event point, which at typical map zoom (framing a reachability circle tens
+  of thousands of feet across) rendered close enough to overlap the aircraft icon on screen,
+  so drags meant for the plane picked up the handle instead. Fixed by scaling the handle
+  distance as a fraction of the reachability circle's own radius
+  (`HEADING_HANDLE_DISTANCE_FRACTION`) instead of a fixed feet value — same lesson as the
+  original wind-arrow-length choice in Phase 2, just rediscovered the hard way.
 
 ## Cross-project learnings
 

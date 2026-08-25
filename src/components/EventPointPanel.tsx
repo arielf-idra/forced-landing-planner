@@ -4,9 +4,15 @@ interface EventPointPanelProps {
   eventPoint: EventPoint | null
   isSampling: boolean
   onAltitudeChange: (altitudeMslFt: number) => void
+  onHeadingChange: (headingDeg: number) => void
 }
 
-export function EventPointPanel({ eventPoint, isSampling, onAltitudeChange }: EventPointPanelProps) {
+export function EventPointPanel({
+  eventPoint,
+  isSampling,
+  onAltitudeChange,
+  onHeadingChange,
+}: EventPointPanelProps) {
   return (
     <section className="panel">
       <h2>Event point</h2>
@@ -31,6 +37,17 @@ export function EventPointPanel({ eventPoint, isSampling, onAltitudeChange }: Ev
               onChange={(e) => onAltitudeChange(Number(e.target.value))}
             />
           </label>
+          <label className="field">
+            Heading (° true)
+            <input
+              type="number"
+              value={Math.round(eventPoint.headingDeg)}
+              min={0}
+              max={360}
+              step={5}
+              onChange={(e) => onHeadingChange(Number(e.target.value))}
+            />
+          </label>
           <dl>
             <dt>Height AGL</dt>
             <dd>
@@ -40,7 +57,9 @@ export function EventPointPanel({ eventPoint, isSampling, onAltitudeChange }: Ev
               ft
             </dd>
           </dl>
-          <p className="hint">Click the map again to move the event point.</p>
+          <p className="hint">
+            Drag the aircraft to reposition it, or the white handle to change heading.
+          </p>
         </>
       )}
     </section>

@@ -8,11 +8,13 @@ its glide ratio and the wind, pick a landing field, and get a suggested approach
 This is a ground-planning / lesson-prep / debrief tool. It runs entirely in the browser —
 no accounts, no server, nothing is saved between sessions.
 
-**Status: early development.** Working so far: a 3D terrain map of Israel, click-to-place
-the engine-failure event point (with real terrain elevation lookup), and a live reachable-
-glide circle driven by editable glide ratio and wind. Landing-site selection, terrain
-clearance checking, and the approach-plan overlay are not built yet — see
-[CLAUDE.md](./CLAUDE.md) for the phase-by-phase plan and current progress.
+**Status: early development.** Working so far: a 3D terrain map, click-to-place the
+engine-failure event point (real terrain elevation, editable heading shown as a Cessna 172
+icon, drag to reposition), a live reachable-glide circle driven by editable glide ratio and
+wind, and picking a landing point with a distance/bearing/in-range readout plus a
+terrain-clearance check along the direct path. The approach-plan overlay (High Key/Low
+Key/base/final) isn't built yet — see [CLAUDE.md](./CLAUDE.md) for the phase-by-phase plan
+and current progress.
 
 ## Methodology & assumptions
 

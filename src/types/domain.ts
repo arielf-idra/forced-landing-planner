@@ -8,6 +8,8 @@ export interface EventPoint extends LatLon {
   altitudeMslFt: number
   /** Ground elevation at this point, MSL, feet (from terrain sampling or manual override). */
   groundElevationMslFt: number
+  /** Aircraft heading at the moment of engine failure, degrees true. Reference only — the reachable-glide circle is heading-independent (the aircraft can turn during the glide). */
+  headingDeg: number
 }
 
 export interface LandingPoint extends LatLon {

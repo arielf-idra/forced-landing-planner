@@ -19,7 +19,7 @@ export function ParametersPanel({
     <section className="panel">
       <h2>Glide parameters</h2>
       <label className="field">
-        Glide ratio (e.g. 9 = 9:1)
+        Glide ratio (X:1 — C172 default ≈ 1.5 NM per 1,000 ft)
         <input
           type="number"
           value={glide.glideRatio}
