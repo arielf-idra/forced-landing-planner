@@ -8,8 +8,8 @@ import {
   type TerrainProvider,
   type Viewer as CesiumViewer,
 } from 'cesium'
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
-import { ScreenSpaceEvent, ScreenSpaceEventHandler, Viewer } from 'resium'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { CameraFlyTo, ScreenSpaceEvent, ScreenSpaceEventHandler, Viewer } from 'resium'
 import '../lib/cesiumIonSetup'
 import type { LatLon } from '../types/domain'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
@@ -26,7 +26,6 @@ interface CesiumMapProps {
 export function CesiumMap({ onTerrainReady, onMapClick, children }: CesiumMapProps) {
   const terrainProviderPromise = useMemo(() => createWorldTerrainAsync(), [])
   const viewerRef = useRef<{ cesiumElement?: CesiumViewer } | null>(null)
-  const hasFlownToIsraelRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -37,17 +36,6 @@ export function CesiumMap({ onTerrainReady, onMapClick, children }: CesiumMapPro
       cancelled = true
     }
   }, [terrainProviderPromise, onTerrainReady])
-
-  // A plain useEffect(() => {}, []) can run before Resium's ref is attached to the
-  // underlying Cesium.Viewer, silently no-oping the fly-to. Use a callback ref instead so
-  // this fires exactly when the viewer instance actually becomes available.
-  const setViewerRef = useCallback((instance: { cesiumElement?: CesiumViewer } | null) => {
-    viewerRef.current = instance
-    if (!hasFlownToIsraelRef.current && instance?.cesiumElement) {
-      hasFlownToIsraelRef.current = true
-      instance.cesiumElement.camera.flyTo({ destination: ISRAEL_RECTANGLE })
-    }
-  }, [])
 
   function handleClick(movement: { position: Cartesian2 } | { startPosition: Cartesian2; endPosition: Cartesian2 }) {
     const viewer = viewerRef.current?.cesiumElement
@@ -66,7 +54,7 @@ export function CesiumMap({ onTerrainReady, onMapClick, children }: CesiumMapPro
   return (
     <Viewer
       full
-      ref={setViewerRef}
+      ref={viewerRef}
       terrainProvider={terrainProviderPromise}
       timeline={false}
       animation={false}
@@ -76,6 +64,12 @@ export function CesiumMap({ onTerrainReady, onMapClick, children }: CesiumMapPro
       navigationHelpButton={false}
       geocoder={false}
     >
+      {/*
+        `once` is required — resium's CameraFlyTo re-fires camera.flyTo on every render
+        with no dependency check of its own, so without it the camera would snap back to
+        Israel on every unrelated state change (placing a marker, editing a parameter).
+      */}
+      <CameraFlyTo once destination={ISRAEL_RECTANGLE} />
       <ScreenSpaceEventHandler>
         <ScreenSpaceEvent action={handleClick} type={ScreenSpaceEventType.LEFT_CLICK} />
       </ScreenSpaceEventHandler>

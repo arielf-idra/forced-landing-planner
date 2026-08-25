@@ -13,13 +13,15 @@ const OUT_DIR = 'dist'
 const wrongPath = path.join(OUT_DIR, BASE_SEGMENT, 'cesium')
 const correctPath = path.join(OUT_DIR, 'cesium')
 
-if (existsSync(wrongPath)) {
-  rmSync(correctPath, { recursive: true, force: true })
-  renameSync(wrongPath, correctPath)
-  rmSync(path.join(OUT_DIR, BASE_SEGMENT), { recursive: true, force: true })
-  console.log(`Moved ${wrongPath} -> ${correctPath}`)
-} else if (!existsSync(correctPath)) {
-  throw new Error(
-    `Expected Cesium assets at ${wrongPath} or ${correctPath} after build, found neither.`,
+if (!existsSync(wrongPath)) {
+  console.log(
+    `[fix-cesium-assets] ${wrongPath} not found — nothing to fix (did vite-plugin-cesium's ` +
+      `behavior change, or vite.config.ts's base?).`,
   )
+  process.exit(0)
 }
+
+rmSync(correctPath, { recursive: true, force: true })
+renameSync(wrongPath, correctPath)
+rmSync(path.join(OUT_DIR, BASE_SEGMENT), { recursive: true, force: true })
+console.log(`[fix-cesium-assets] moved ${wrongPath} -> ${correctPath}`)

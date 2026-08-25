@@ -56,7 +56,8 @@ src/
 ## Commands
 
 - `npm run dev` — dev server
-- `npm run build` — `tsc -b && vite build` (also what CI/deploy run)
+- `npm run build` — `tsc -b && vite build`, then `postbuild` runs `scripts/fix-cesium-assets.mjs`
+  automatically (also what CI/deploy run)
 - `npm run test` — Vitest, single run (`npm run test:watch` for watch mode)
 - `npm run lint` — ESLint
 - `npm run format` — Prettier write
@@ -95,10 +96,13 @@ is ever renamed, update `base` there to match.
   `tsconfig.node.json` (not `nodenext`) — under `nodenext`, TS resolves its `.d.ts` as a CJS
   ambient declaration (the package has no `"type": "module"`) and the default import comes
   back as a non-callable namespace object.
-- Resium's `<Viewer ref={...}>`: don't fly the camera in a `useEffect(() => {...}, [])` with
-  a plain `useRef` — it can run before Resium attaches `.cesiumElement` to the ref, and the
-  `flyTo` silently no-ops (camera stays at Cesium's default whole-globe view). Use a callback
-  ref that fires exactly when the instance becomes available instead (see `CesiumMap.tsx`).
+- Resium's `<Viewer ref={...}>`: don't fly the camera in a `useEffect(() => {...}, [])` with a
+  plain `useRef` — it can run before Resium attaches `.cesiumElement` to the ref, and the
+  `flyTo` silently no-ops (camera stays at Cesium's default whole-globe view). Use the
+  declarative `<CameraFlyTo once destination={...} />` as a child of `<Viewer>` instead (see
+  `CesiumMap.tsx`) — `once` is required, or resium re-fires `camera.flyTo` on every render
+  (any state change anywhere would snap the camera back). Confirmed against a sibling
+  project, see below.
 - `vite-plugin-cesium` + a non-root `base` (needed for a GitHub Pages *project* site, e.g.
   `/forced-landing-planner/`) — the plugin's `closeBundle` hook copies Cesium's static
   assets to `<outDir>/<base>/cesium/...` instead of `<outDir>/cesium/...`, double-applying
@@ -113,6 +117,39 @@ is ever renamed, update `base` there to match.
   live site serves the raw unbuilt `index.html` (references `/src/main.tsx`, 404s in the
   console), check Settings → Pages → Build and deployment → Source. Changing that dropdown
   does not itself trigger a redeploy — push a commit (or re-run the workflow) afterwards.
+
+## Cross-project learnings
+
+[arielf-idra/flight-pattern](https://github.com/arielf-idra/flight-pattern) is a sibling
+Vite + React + Cesium/Resium app (visualizes an airport traffic pattern in 3D, same author,
+same GitHub Pages deployment shape) built and hardened before this one. Worth re-reading its
+`CLAUDE.md` when working on Phase 3/4 here — it independently hit and documented:
+
+- **The exact same `vite-plugin-cesium` double-base-path asset bug** (its
+  `scripts/fix-cesium-assets.mjs` is effectively the same fix as ours, confirming it's a
+  real plugin bug, not something we misconfigured).
+- **`PolylineGraphics` at a real altitude above terrain silently vanishes** wherever the
+  terrain later rises above the line's altitude — Cesium depth-tests the line against the
+  terrain mesh. Fix: every such polyline needs `depthFailMaterial` set to the same
+  color/material as `material`. **Directly relevant to Phase 3's terrain-clearance line and
+  Phase 4's approach-plan legs**, both of which are lines at altitude over terrain — add
+  `depthFailMaterial` to them from the start rather than rediscovering this via a visually
+  "truncated" line over hilly terrain (their LLIB/RWY33 case).
+- **Point/label entities above terrain need `disableDepthTestDistance={Number.POSITIVE_INFINITY}`**
+  (not a `PolylineGraphics` prop — that one only takes `depthFailMaterial`) to stay visible
+  through terrain rather than being occluded. Relevant to Phase 4's High Key/Low Key/base/
+  final markers and labels.
+- **Cesium renders a dead gray screen with no error/exception if fed a NaN position or
+  orientation** (e.g. from a degenerate near-zero-length segment in computed geometry) —
+  worth a sanity check on computed points before handing them to `Cartesian3.fromDegrees`
+  once Phase 3/4 introduce more derived geometry (terrain-profile sampling, key-position
+  placement), rather than assuming a blank map means a network/token problem.
+- `globe.tileCacheSize` (default ~100) is worth raising if a feature revisits the same small
+  area repeatedly (their cockpit-view flythrough); likely not needed for this app's
+  click-once-per-scenario usage pattern, but worth knowing if terrain reloading is ever
+  visibly janky.
+- Uses React 18 / Cesium ~1.121 / Vite 6 vs. this repo's React 19 / Cesium ~1.144 / Vite 8 —
+  noticeably older toolchain, so it won't have hit issues specific to our newer versions.
 
 Keep this file and `README.md` updated as phases land — don't let them drift from what's
 actually implemented.
