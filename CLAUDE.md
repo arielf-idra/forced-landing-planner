@@ -99,6 +99,20 @@ is ever renamed, update `base` there to match.
   a plain `useRef` — it can run before Resium attaches `.cesiumElement` to the ref, and the
   `flyTo` silently no-ops (camera stays at Cesium's default whole-globe view). Use a callback
   ref that fires exactly when the instance becomes available instead (see `CesiumMap.tsx`).
+- `vite-plugin-cesium` + a non-root `base` (needed for a GitHub Pages *project* site, e.g.
+  `/forced-landing-planner/`) — the plugin's `closeBundle` hook copies Cesium's static
+  assets to `<outDir>/<base>/cesium/...` instead of `<outDir>/cesium/...`, double-applying
+  `base` (which should only prefix URLs, not the physical build output). The built
+  `index.html` correctly requests `/<base>/cesium/...`, so the files end up nested one
+  level too deep and 404 in production (dev server is unaffected — it serves the plugin's
+  own middleware, not the built files). Fixed with a post-build step,
+  `scripts/fix-cesium-assets.mjs`, run as part of `npm run build`, that flattens the extra
+  nesting. If the repo is ever renamed, update the `BASE_SEGMENT` constant in that script
+  alongside `base` in `vite.config.ts`.
+- GitHub Pages "Source" defaults to "Deploy from a branch", not "GitHub Actions" — if the
+  live site serves the raw unbuilt `index.html` (references `/src/main.tsx`, 404s in the
+  console), check Settings → Pages → Build and deployment → Source. Changing that dropdown
+  does not itself trigger a redeploy — push a commit (or re-run the workflow) afterwards.
 
 Keep this file and `README.md` updated as phases land — don't let them drift from what's
 actually implemented.

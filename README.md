@@ -62,8 +62,12 @@ Pushes to `main` build and deploy automatically to GitHub Pages via
 `.github/workflows/deploy.yml`. Pull requests run lint/test/build via
 `.github/workflows/ci.yml`.
 
-If the live site shows a blank page serving raw source (e.g. a `<script>` tag pointing at
-`/src/main.tsx` instead of a hashed `/assets/*.js` bundle), check
-**Settings → Pages → Build and deployment → Source** is set to "GitHub Actions", not
-"Deploy from a branch". Note that changing that dropdown does not itself trigger a new
-deployment — push a commit (or re-run the workflow) afterwards.
+If the live site shows a blank page:
+
+- **Raw source served** (a `<script>` tag pointing at `/src/main.tsx` instead of a hashed
+  `/assets/*.js` bundle) — check **Settings → Pages → Build and deployment → Source** is
+  set to "GitHub Actions", not "Deploy from a branch". Changing that dropdown does not
+  itself trigger a new deployment — push a commit (or re-run the workflow) afterwards.
+- **404s on `/cesium/...` in the console** — see the `vite-plugin-cesium` note in
+  [CLAUDE.md](./CLAUDE.md#known-gotchas-hit-so-far); `npm run build` includes a fixup step
+  for this, so it should only recur if that step is skipped or the repo is renamed.
