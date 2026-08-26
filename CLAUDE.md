@@ -44,11 +44,50 @@ plan file if it's not visible in this session; it's not checked into the repo.
   generic rectangular-pattern guess — see `src/lib/approach.ts`'s doc comment for the full
   derivation. All three altitudes are fixed briefed targets, **not** derived from glide
   ratio — unlike the reachability circle, this represents a maneuvering descent. Landing
-  heading defaults to whichever of the strip's two directions is closer to into-wind
-  (`defaultLandingHeadingDeg`), editable afterward.
-- Defaults (glide ratio ~9:1, best glide ~65 KIAS, approach altitudes) live in
-  `src/lib/geo-constants.ts` and are starting points, always user-editable in the UI — never
-  hardcode them elsewhere.
+  heading defaults to whichever of the strip's two directions needs *less transit
+  maneuvering* from the event point (`preferredLandingHeadingDeg` — computes both
+  directions' full approach plan and transit route, compares total transit distance, and
+  falls back to whichever is closer to into-wind — `defaultLandingHeadingDeg` — only when the
+  two are within `MANEUVER_COST_TIE_MARGIN_FT` of each other), editable afterward. Landing
+  one way can put Downwind almost directly ahead of the aircraft; landing the other way can
+  put it nearly behind, forcing a much longer transit turn — usually a bigger practical
+  concern than a small wind misalignment. Dragging either strip endpoint re-derives the
+  landing heading from the strip's new orientation (not just its new position, and still via
+  the plain into-wind `defaultLandingHeadingDeg` here, not the maneuver-cost comparison — a
+  drag re-tracks orientation continuity from whatever heading was already chosen, it doesn't
+  re-evaluate the transit tradeoff), so the whole pattern rotates to match, not just
+  translates.
+- **Transit route (event point → pattern entry)**: `src/lib/route.ts`'s `buildHeadingLegRoute`
+  builds the path from the aircraft's nose (event point offset forward along its heading by
+  `AIRCRAFT_NOSE_OFFSET_PX` screen pixels, converted to a real-world distance via the camera's
+  live meters-per-pixel at the event point — not the icon's anchor/center point, and not a
+  fixed real-world distance either — see gotcha below for why) to the approach plan's Downwind
+  checkpoint. Currently called with `legDistanceFt=0` — a **single straight line**, no turn
+  geometry at all — after two more elaborate designs (a constant-radius turn arc; a turn arc
+  plus a short heading-establishing leg) were each tried, shipped, and reverted following
+  real, reproducible bugs (turn-direction selection, wind-drift-during-turn, and a heading leg
+  that flew *away* from Downwind before correcting when the required turn was large — see
+  gotchas below for the full history). `buildHeadingLegRoute`'s optional heading leg
+  (`legDistanceFt` param, `NOSE_HEADING_LEG_NM` constant) is kept and still tested, in case a
+  future version reintroduces it capped to small turn angles only. `roundCorners` (same file)
+  still rounds the pattern's Base and Final corners to the transit turn radius — that geometry
+  was verified separately and never shared the transit route's bugs. The transit route and the
+  rounded pattern render as one continuous line, single style throughout (`App.tsx`'s
+  `combinedRoutePositions`), not a dashed transit leg plus separate solid pattern legs.
+  `altitudesAlongPath` assigns each rounded-path point an altitude by its distance fraction
+  along the *original* straight-line waypoint chain — exact at each real waypoint, approximate
+  only on the cut-corner arc samples. `pointAtDistance` interpolates position/altitude along
+  the transit route for the altitude (MSL + AGL) callouts placed every
+  `ALTITUDE_CALLOUT_INTERVAL_NM` (0.5 NM).
+- **Camera auto-framing**: `CesiumMap`'s `flyToRegion` prop drives an imperative
+  `viewer.camera.flyTo` (not the one-shot `<CameraFlyTo once>` used for the initial default
+  view) to frame the reachability circle, with `FLY_TO_MARGIN_FACTOR` (1.3×) of padding,
+  whenever the event point is placed, finishes being dragged, or its altitude/glide
+  ratio/wind changes — anything that moves or resizes the circle — but not on every
+  intermediate position during a drag itself (`App.tsx` gates this on `!isDragging`).
+- Defaults (glide ratio ~9:1, best glide ~65 KIAS, wind 5 kt from the west, approach
+  altitudes) live in `src/lib/geo-constants.ts` and are starting points, always user-editable
+  in the UI — never hardcode them elsewhere.
 
 Keep `src/lib/*` framework-agnostic (no Cesium imports) — it's the safety-relevant math and
 must stay unit-testable in isolation. Cesium-specific glue (terrain sampling, entity
@@ -69,7 +108,7 @@ src/
   components/   CesiumMap, EventPointPanel, ParametersPanel, LandingInfoPanel,
                 ApproachPanel, WindIndicator
                 (SummaryPanel, Legend — Phase 5, not built yet)
-  lib/          glide.ts, terrainProfile.ts, landingStrip.ts, approach.ts,
+  lib/          glide.ts, terrainProfile.ts, landingStrip.ts, approach.ts, route.ts,
                 geo.ts, geo-constants.ts, units.ts, runwayTexture.ts         (pure, tested)
                 terrain.ts, cesiumIonSetup.ts, fieldLookup.ts                (Cesium/network-dependent glue)
   types/        domain.ts
@@ -135,11 +174,17 @@ is ever renamed, update `base` there to match.
       Downwind/Base/Final/Touchdown checkpoints from the strip + landing heading;
       `ApproachPanel` exposes heading, turn direction, and the altitude/distance defaults.
       All rendered at absolute altitude with `depthFailMaterial`/`disableDepthTestDistance`
-      per the gotchas below. A dashed leg (`routeToPatternMaterial`) connects the event point
-      to the Downwind checkpoint, so the full route is planned end to end, not just the
-      pattern in isolation. Verified against real Ministry-of-Agriculture field data in a
-      real browser (both the detected-field and no-field-found/manual paths, plus dragging
-      both strip endpoints and confirming the pattern recomputes from the new strip).
+      per the gotchas below. A dashed leg, now built by `route.ts`'s `planRouteToTarget`
+      (constant-radius turn from the event point's heading, then straight, radius from best
+      glide speed + a 30° max bank default), connects the event point to the Downwind
+      checkpoint with altitude callouts every 0.5 NM (`pointAtDistance`) — a flyable transit,
+      not an instant-turn straight line. The strip-estimation axis is clipped to the field
+      polygon's interior (longest contiguous inside run, handles non-convex/L-shaped fields —
+      see `landingStrip.ts`'s `clipSegmentToPolygon`) so a suggested strip never extends past
+      the actual field boundary. Verified against real Ministry-of-Agriculture field data in
+      a real browser (both the detected-field and no-field-found/manual paths, dragging both
+      strip endpoints and confirming the pattern's position *and* heading recompute from the
+      new strip, and the turn-radius route + altitude callouts rendering correctly).
 - [ ] Phase 5 — polish
 
 ### Known gotchas hit so far
@@ -237,6 +282,175 @@ is ever renamed, update `base` there to match.
   flipping to `'manual'`), not just that a screenshot looks plausible; a picking miss that
   falls through to native camera panning can look like nothing-happened rather than an
   error.
+- **The farthest-vertex-pair axis for a non-convex field can cut outside the polygon** — a
+  straight line between the two farthest-apart ring vertices of an L-shaped (or otherwise
+  concave) field can pass through a notch that isn't part of the field at all, even though
+  both endpoints individually sit inside it (so a naive first/last-inside-sample clip would
+  miss the gap). `landingStrip.ts`'s `clipSegmentToPolygon` fixes this by sampling the
+  candidate segment and keeping the *longest single contiguous run* of inside samples, not
+  just the outermost inside samples — caught by an L-shaped-field unit test, not by eyeballing
+  a convex rectangle fixture.
+- **Tangent-point-on-a-circle geometry: `arccos(radius/distance)`, not `arcsin`** —
+  `route.ts`'s `findTangentPoint` computes the angle at the turn circle's center between the
+  bearing to the target and the bearing to the tangent point. In the right triangle
+  (center, tangent point, target) the right angle is *at the tangent point* (a tangent line
+  is perpendicular to the radius), so `radius/distance` is the ratio adjacent to the center's
+  angle over the hypotenuse — that's `cos`, not `sin`. Using `asin` instead produced the
+  *complementary* angle, which put the "tangent point" candidates roughly 90° away from the
+  real tangent points; every downstream check (exit-velocity-matches-bearing-to-target)
+  still ran without throwing, it just silently picked a wrong-but-plausible-looking point,
+  producing an arc whose exit heading kinked ~80° off the following straight leg instead of
+  rolling out smoothly. Caught by a unit test asserting tangent continuity (<5° kink), not by
+  visual inspection — the wrongness isn't obvious from a screenshot at typical zoom. If a
+  similar circle/external-point tangent construction comes up again, derive the angle from
+  the right triangle explicitly (which side is opposite/adjacent to which angle) rather than
+  reaching for `asin` vs `acos` from memory.
+- **Adding a `useEffect` that reads a ref makes the React Compiler ESLint rule
+  (`react-hooks/immutability`) flag *other, pre-existing* direct mutations through that same
+  ref elsewhere in the component** — even plain event-handler functions (not effects) that
+  imperatively set a Cesium object property (e.g. `CesiumMap`'s `handleLeftDown`/`handleLeftUp`
+  toggling `viewer.scene.screenSpaceCameraController.enableInputs`) start erroring the moment
+  *any* effect in the same component also reads `viewerRef.current`, as `flyToRegion`'s
+  camera-framing effect does. The mutations themselves are fine (imperative Cesium glue
+  outside React's render cycle, the same pattern already used throughout `CesiumMap`) — this
+  is the static analysis being conservative about a ref now being "effect-tracked," not a real
+  bug. Fixed with a targeted `// eslint-disable-next-line react-hooks/immutability` at each
+  flagged mutation site, same as the existing `react-hooks/set-state-in-effect` suppression
+  already used for the terrain-profile-sampling effect's synchronous `setIsSamplingProfile`
+  call. Expect this to recur if a new effect starts reading `viewerRef` — check for newly
+  flagged mutations elsewhere in the file, not just the new effect itself.
+- **`planRouteToTarget` picking a turn direction from the sign of the heading difference alone
+  breaks down badly for a near-reversal target** (event point heading close to 180° away from
+  the bearing to Downwind — not a rare configuration; it just depends on where the user drags
+  the event point and its heading relative to wherever the strip/pattern ends up). "Target to
+  the right → turn right" is a fine heuristic normally, but near an exact reversal the *other*
+  direction can be dramatically shorter — one direction found in testing needed a 223° sweep
+  around the turn circle (visibly a huge, nonsensical loop swinging away from the target before
+  correcting) where the other needed a normal reversal-turn's worth (~140–180°). Reported by
+  the user as "the connection from route to pattern doesn't make sense, it's not a physical
+  turn" — a real bug, not just an ugly-but-technically-valid path: for that specific case the
+  *shorter* direction was available and simply never tried. Fixed by computing the route for
+  *both* turn directions (`buildTurnRoute`, called once per sign) and keeping whichever has
+  the smaller `totalDistanceFt`, rather than committing to one direction upfront. Note this
+  doesn't (and can't) make a genuine ~180° reversal cheap — flying a same-radius turn to
+  reverse course inherently costs about half the turn circle's circumference no matter which
+  way you turn (confirmed: for an exact 180° case the two directions are equidistant by
+  symmetry, so "try both" doesn't help *that* specific case, only asymmetric near-reversals
+  where one direction really is shorter) — that's a real physical cost of the maneuver, not a
+  bug. Caught by sweeping many heading/target combinations and flagging any route whose
+  `totalDistanceFt` was disproportionate to the turn radius, not by eyeballing one scenario —
+  the original 90°-turn unit test that shipped with this feature passed cleanly and gave no
+  hint of the problem, since it never exercised a near-reversal heading. `roundCorners` (the
+  pattern's own corner rounding) does **not** share this bug — it derives its turn direction
+  from the actual known deflection angle between two explicit leg bearings (an unambiguous
+  fillet), not from picking between two candidate tangent points to an arbitrary external
+  target, so there's no "which direction is shorter" question to get wrong there.
+- **A large, sweeping loop near the event point in the transit route is not automatically a
+  bug** — even after the turn-direction fix above (which picks whichever direction is
+  *shorter*), a near-180° heading difference between the event point's heading and the
+  bearing to Downwind is inherently expensive to fly with a single constant-radius turn: a
+  same-radius course reversal costs roughly half the turn circle's circumference no matter
+  which way you turn (confirmed via a sweep test — a 5 kt wind on top of an already-near-180°
+  case shifted total distance by only ~160 ft, nowhere near enough to explain a dramatically
+  larger loop; the loop's size is dominated by the turn radius and how far from "straight
+  ahead" Downwind actually is, not by wind). Before treating a big loop as a bug, check the
+  actual heading difference between the event point and Downwind — if it's genuinely close to
+  180°, this is the aircraft correctly flying most of a circle to reverse course, not a
+  miscalculation. Verify with the same sweep-test technique as the turn-direction bug (vary
+  bearing/distance/wind and look for a route whose direction choice or distance changes
+  *unexpectedly* between similar inputs) before assuming the geometry itself is wrong.
+- **The transit route's start ("the aircraft's nose") needs a *live, per-frame* pixel-to-
+  meters conversion to track the aircraft billboard icon correctly at arbitrary zoom — no
+  real-world-distance offset, fixed or scaled, can do this.** The icon renders at a fixed
+  *pixel* size (`scale=0.2` billboard, no distance-based scaling) regardless of camera zoom,
+  so any constant real-world offset renders at a different pixel size every zoom level: a
+  fixed ~13 ft offset (half the C172's length) was invisible at the zoom levels this app
+  operates at; scaling it to a fraction of the reachability circle's radius made it visible at
+  the zoom the auto-zoom feature settles on but wrong everywhere else, and — the actual bug
+  the user caught by name ("using the location of the left wing instead of the nose") — even
+  a visible-enough offset can still land *inside* the icon's own rendered footprint if it's
+  smaller than the icon's half-length, in which case the route's start is invisible (occluded
+  by the icon) and what you actually see is wherever the arc's curve happens to first poke out
+  from behind it — which side that is depends on which way the turn goes, not on the aircraft's
+  heading, so it can easily look like it's coming from a wingtip or the tail. `aircraft-
+  icon.png` is 320×267 px source, ~64×53 px rendered at `scale=0.2` — an offset has to clear
+  *that* footprint (`AIRCRAFT_NOSE_OFFSET_PX` = 45, found by actually reading the PNG's IHDR
+  chunk for its pixel dimensions rather than guessing from scale alone) before "does it track
+  zoom" even matters. Fixed properly: `CesiumMap` takes `pixelScaleReferencePosition` (the
+  event point) and reports live meters-per-pixel there via `onMetersPerPixelChange`, computed
+  on every `viewer.scene.postRender` frame (throttled to only re-report past a ~2% change) —
+  not just at discrete moments like a flyTo, since the user must be able to manually zoom
+  further than the auto-zoom's chosen level and still see the offset track correctly. `App.tsx`
+  turns that into a real-world offset (`metersPerPixelAtEvent * AIRCRAFT_NOSE_OFFSET_PX`) for
+  `nosePosition`. Verified across three different zoom levels in a real browser (not just one
+  screenshot) — the earlier fraction-based attempt *looked* plausible in a single screenshot
+  and still turned out wrong at a different zoom/heading combination.
+- **A live per-frame Cesium event listener must not be re-subscribed on every position
+  update, or a drag can hang the whole page** — the pixel-tracking effect above initially
+  depended directly on `pixelScaleReferencePosition?.lat`/`.lon`, which change on nearly every
+  `mousemove` sample while the caller is dragging the event point. Each change tore down and
+  rebuilt a `viewer.scene.postRender` listener (plus a new `BoundingSphere`) — cheap once, but
+  enough churn across dozens of drag-tick re-subscriptions to reliably hang the page during a
+  drag in Playwright testing (confirmed by adding step-by-step logging: execution stopped
+  exactly at the `mouse.move` call that generated the intermediate drag samples). Fixed by
+  tracking the reference position and the callback in refs (updated via their own tiny
+  effects, not written during render — the React Compiler's `react-hooks/refs` rule catches a
+  direct `ref.current = x` in the render body) and setting up the `postRender` listener itself
+  only once, gated on a `viewerReady` state flag rather than on the position. General lesson:
+  anything hooked to `postRender`/`preRender`/similar high-frequency Cesium events should
+  never have a *value that changes every frame* in its effect's dependency array — only
+  *setup*-triggering conditions (viewer readiness, entity identity) belong there.
+- **The real, final root cause of "the route doesn't start at the nose" — after the pixel-
+  scale fix above was already correct and verified — was that the aircraft billboard and the
+  route were rendered at different altitudes.** The billboard's `position` used
+  `Cartesian3.fromDegrees(lon, lat)` (2-argument form — height defaults to 0, i.e. the
+  ellipsoid surface / roughly ground level), while the route's first point used
+  `Cartesian3.fromDegrees(lon, lat, feetToMeters(altitudeMslFt))` with `altitudeMslFt` equal
+  to the event point's real flying altitude (e.g. 2000 ft MSL, ~1800 ft above ground in a
+  typical scenario) — because, correctly per this file's own domain-model section, the route
+  represents a real flying altitude and must use absolute height, not ground-clamping. Two
+  points can share the exact same lat/lon and still project to *different screen pixels*
+  under Cesium's tilted 3D camera if they sit at very different heights — and by how much
+  differs continuously with the camera's zoom and tilt angle, which is exactly the "changes
+  with zoom, connects to a different location around the plane" symptom that survived every
+  attempted fix to the route's *geometry* (arc, straight line, heading-leg) — none of which
+  could have fixed it, because the bug was never in the lat/lon math. Diagnosed by disabling
+  the route line entirely and adding two plain `PointGraphics` debug markers — one at the
+  event point's exact position, one at `nosePosition` — both still using the 2-argument
+  ground-level `fromDegrees`. Both tracked perfectly across zoom, rotation, and dragging,
+  which meant the *positions* were right and the *rendering height* was the only remaining
+  variable — reading the route's own position code immediately confirmed the height mismatch.
+  Fixed by giving the aircraft billboard (and, while debugging, the plain markers) the same
+  3-argument `Cartesian3.fromDegrees(lon, lat, feetToMeters(eventPoint.altitudeMslFt))` the
+  route already used. Lesson for any future "two things that should visually coincide don't"
+  bug involving Cesium entities: check whether both are rendered at the *same height*
+  (ground-clamped vs. absolute-altitude) before suspecting the lat/lon calculation — a
+  same-lat/lon, different-height mismatch is invisible in the numbers (both points can print
+  identical lat/lon in a debug readout) and only shows up as a camera-angle-dependent visual
+  offset, which looks exactly like a flaky calculation bug but isn't one.
+- **Fixing the billboard's render height (above) wasn't the whole fix — the meters-per-pixel
+  *measurement point* had the identical bug, one layer deeper.** `CesiumMap`'s pixel-scale
+  effect built its `BoundingSphere` at `Cartesian3.fromDegrees(pos.lon, pos.lat)` — ground
+  level — even after the aircraft itself moved to real altitude. `camera.getPixelSize`'s
+  result depends on distance from the camera to that exact 3D point, so measuring at the
+  ground while the icon actually renders thousands of feet up returns a meters-per-pixel value
+  for the wrong point — and the resulting nose offset can be wrong by several times its
+  intended size, worse at higher altitude and at closer zoom (both increase the ground-vs-icon
+  distance error relative to the total camera distance). This one hid behind the first fix:
+  at the default 2000 ft scenario used throughout most of this session's testing the error was
+  small enough to look fixed, and only became obviously wrong when the user tried a much
+  higher altitude (4000 ft) — **always sweep a parameter's range (low/default/high), not just
+  the value already being tested, before declaring a fix complete.** Fixed by threading
+  `altitudeMslFt` through `pixelScaleReferencePosition` (now `LatLon & { altitudeMslFt?:
+  number }`) so the `BoundingSphere` is built at the same real-altitude 3D point the icon
+  actually renders at. The heading-handle line and its draggable point had the same
+  ground-level-position bug (caught by the user, "check the heading white line, it seems not
+  to be exactly on the nose") — fixed the same way, switched from `clampToGround` to absolute
+  altitude at `eventPoint.altitudeMslFt`; its drag behavior is unaffected, since drag-target
+  computation (`CesiumMap`'s `pickGround`) always ray-casts against the terrain regardless of
+  where the entity is rendered, and initiating a drag (`scene.pick`) picks against the
+  rendered scene, which correctly accounts for the entity's actual (now-elevated) screen
+  position either way.
 
 ## Cross-project learnings
 

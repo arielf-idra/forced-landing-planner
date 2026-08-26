@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { computeApproachPlan, defaultLandingHeadingDeg, type ApproachParameters } from './approach'
+import {
+  computeApproachPlan,
+  defaultLandingHeadingDeg,
+  preferredLandingHeadingDeg,
+  type ApproachParameters,
+} from './approach'
 import { bearingDegrees, destinationPoint, distanceMeters } from './geo'
 import { feetToMeters } from './units'
 import type { LatLon } from '../types/domain'
@@ -28,6 +33,48 @@ describe('defaultLandingHeadingDeg', () => {
     expect(defaultLandingHeadingDeg(strip, 180)).toBeCloseTo(180, 3)
     // Wind roughly from the north-ish (20°) should still prefer 0° over 180°.
     expect(defaultLandingHeadingDeg(strip, 20)).toBeCloseTo(0, 3)
+  })
+})
+
+describe('preferredLandingHeadingDeg', () => {
+  it('prefers the landing direction needing less transit maneuvering, even against the wind', () => {
+    // Event point well west of the strip's south end, heading north: nearly a direct line to
+    // the northbound-landing option's Downwind (offset west of a touchdown near the south end,
+    // left pattern), but a long way around to the southbound option's Downwind (offset east of
+    // a touchdown near the strip's far/north end).
+    const eventPoint = destinationPoint(south, 2000, 270)
+    const eventHeadingDeg = 0
+    const turnRadiusFt = 648
+
+    // Wind from the north would naively favor landing heading 0 anyway — not a real test of
+    // the maneuver-cost logic on its own.
+    expect(
+      preferredLandingHeadingDeg(
+        strip,
+        eventPoint,
+        eventHeadingDeg,
+        turnRadiusFt,
+        65,
+        groundElevationMslFt,
+        params,
+        { speedKt: 0, directionFromDeg: 0 },
+      ),
+    ).toBeCloseTo(0, 0)
+
+    // Wind flipped to strongly favor landing heading 180 instead — the maneuver-cost gap here
+    // is large enough that it should still win over the wind preference.
+    expect(
+      preferredLandingHeadingDeg(
+        strip,
+        eventPoint,
+        eventHeadingDeg,
+        turnRadiusFt,
+        65,
+        groundElevationMslFt,
+        params,
+        { speedKt: 0, directionFromDeg: 180 },
+      ),
+    ).toBeCloseTo(0, 0)
   })
 })
 

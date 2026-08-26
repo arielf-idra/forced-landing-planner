@@ -1,5 +1,7 @@
-import type { ApproachPlan, LatLon } from '../types/domain'
+import type { ApproachPlan, LatLon, WindVector } from '../types/domain'
 import { bearingDegrees, destinationPoint, distanceMeters } from './geo'
+import { MANEUVER_COST_TIE_MARGIN_FT } from './geo-constants'
+import { planRouteToTarget } from './route'
 import { feetToMeters } from './units'
 
 export interface ApproachParameters {
@@ -27,6 +29,49 @@ export function defaultLandingHeadingDeg(
     angularDifferenceDeg(reverseBearingDeg, windDirectionFromDeg)
     ? forwardBearingDeg
     : reverseBearingDeg
+}
+
+/**
+ * Compares the strip's two possible landing directions (forward and reverse) by how much
+ * extra maneuvering the transit route from `eventPoint` to each direction's Downwind
+ * checkpoint requires, and returns whichever needs less — landing one way can put Downwind on
+ * the far side of a big turn from the event point (e.g. nearly behind the aircraft's current
+ * heading), while landing the other way puts it almost directly ahead. That difference in
+ * required maneuvering is usually a bigger practical concern than a small wind misalignment,
+ * so it's checked first (using each direction's wind-drift-adjusted transit route, via
+ * `planRouteToTarget`'s own `speedKt`/`wind` — the same turn that drifts also costs more or
+ * less distance depending on which way it turns relative to the wind). `wind`'s direction only
+ * breaks a near-tie (the two directions' transit routes within `MANEUVER_COST_TIE_MARGIN_FT`
+ * of each other) — the into-wind default still stands whenever neither direction is clearly
+ * easier to reach.
+ */
+export function preferredLandingHeadingDeg(
+  strip: { start: LatLon; end: LatLon },
+  eventPoint: LatLon,
+  eventHeadingDeg: number,
+  turnRadiusFt: number,
+  speedKt: number,
+  groundElevationMslFt: number,
+  approachParams: ApproachParameters,
+  wind: WindVector,
+): number {
+  const forwardBearingDeg = bearingDegrees(strip.start, strip.end)
+  const reverseBearingDeg = (forwardBearingDeg + 180) % 360
+
+  const options = [forwardBearingDeg, reverseBearingDeg].map((headingDeg) => {
+    const plan = computeApproachPlan(strip, headingDeg, groundElevationMslFt, approachParams)
+    const route = planRouteToTarget(eventPoint, eventHeadingDeg, plan.downwind, turnRadiusFt, speedKt, wind)
+    return { headingDeg, maneuverCostFt: route.totalDistanceFt }
+  })
+
+  const [a, b] = options
+  if (Math.abs(a.maneuverCostFt - b.maneuverCostFt) > MANEUVER_COST_TIE_MARGIN_FT) {
+    return a.maneuverCostFt < b.maneuverCostFt ? a.headingDeg : b.headingDeg
+  }
+  return angularDifferenceDeg(a.headingDeg, wind.directionFromDeg) <=
+    angularDifferenceDeg(b.headingDeg, wind.directionFromDeg)
+    ? a.headingDeg
+    : b.headingDeg
 }
 
 /**
