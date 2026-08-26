@@ -7,6 +7,7 @@ import {
   LabelStyle,
   Math as CesiumMath,
   PolygonHierarchy,
+  PolylineDashMaterialProperty,
   type TerrainProvider,
 } from 'cesium'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -149,9 +150,17 @@ function App() {
           return { ...prev, headingDeg: bearingDegrees(prev, point) }
         })
       } else if (entityId === STRIP_START_ID) {
-        setLandingStrip((prev) => (prev ? { ...prev, start: point, source: 'manual' } : prev))
+        setLandingStrip((prev) =>
+          prev
+            ? { start: point, end: prev.end, source: 'manual' }
+            : prev,
+        )
       } else if (entityId === STRIP_END_ID) {
-        setLandingStrip((prev) => (prev ? { ...prev, end: point, source: 'manual' } : prev))
+        setLandingStrip((prev) =>
+          prev
+            ? { start: prev.start, end: point, source: 'manual' }
+            : prev,
+        )
       }
     },
     [terrainProvider],
@@ -237,6 +246,12 @@ function App() {
   // scaling needed when the user drags them.
   const runwayMaterial = useMemo(
     () => new ImageMaterialProperty({ image: RUNWAY_TEXTURE_DATA_URI }),
+    [],
+  )
+
+  // Dashed to visually distinguish "transit to the pattern" from the pattern's own solid legs.
+  const routeToPatternMaterial = useMemo(
+    () => new PolylineDashMaterialProperty({ color: APPROACH_COLOR }),
     [],
   )
 
@@ -445,10 +460,10 @@ function App() {
                 position={Cartesian3.fromDegrees(landingStrip.start.lon, landingStrip.start.lat)}
               >
                 <PointGraphics
-                  pixelSize={10}
+                  pixelSize={22}
                   color={STRIP_COLOR}
                   outlineColor={Color.WHITE}
-                  outlineWidth={2}
+                  outlineWidth={3}
                   disableDepthTestDistance={Number.POSITIVE_INFINITY}
                 />
               </Entity>
@@ -457,10 +472,10 @@ function App() {
                 position={Cartesian3.fromDegrees(landingStrip.end.lon, landingStrip.end.lat)}
               >
                 <PointGraphics
-                  pixelSize={10}
+                  pixelSize={22}
                   color={STRIP_COLOR}
                   outlineColor={Color.WHITE}
-                  outlineWidth={2}
+                  outlineWidth={3}
                   disableDepthTestDistance={Number.POSITIVE_INFINITY}
                 />
               </Entity>
@@ -512,6 +527,27 @@ function App() {
                   depthFailMaterial={APPROACH_COLOR}
                 />
               </Entity>
+              {eventPoint && (
+                <Entity>
+                  <PolylineGraphics
+                    positions={[
+                      Cartesian3.fromDegrees(
+                        eventPoint.lon,
+                        eventPoint.lat,
+                        feetToMeters(eventPoint.altitudeMslFt),
+                      ),
+                      Cartesian3.fromDegrees(
+                        approachPlan.downwind.lon,
+                        approachPlan.downwind.lat,
+                        feetToMeters(approachPlan.downwind.altitudeMslFt),
+                      ),
+                    ]}
+                    width={2}
+                    material={routeToPatternMaterial}
+                    depthFailMaterial={routeToPatternMaterial}
+                  />
+                </Entity>
+              )}
             </>
           )}
         </CesiumMap>

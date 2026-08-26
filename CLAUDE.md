@@ -135,8 +135,11 @@ is ever renamed, update `base` there to match.
       Downwind/Base/Final/Touchdown checkpoints from the strip + landing heading;
       `ApproachPanel` exposes heading, turn direction, and the altitude/distance defaults.
       All rendered at absolute altitude with `depthFailMaterial`/`disableDepthTestDistance`
-      per the gotchas below. Verified against real Ministry-of-Agriculture field data in a
-      real browser (both the detected-field and no-field-found/manual paths).
+      per the gotchas below. A dashed leg (`routeToPatternMaterial`) connects the event point
+      to the Downwind checkpoint, so the full route is planned end to end, not just the
+      pattern in isolation. Verified against real Ministry-of-Agriculture field data in a
+      real browser (both the detected-field and no-field-found/manual paths, plus dragging
+      both strip endpoints and confirming the pattern recomputes from the new strip).
 - [ ] Phase 5 — polish
 
 ### Known gotchas hit so far
@@ -220,6 +223,20 @@ is ever renamed, update `base` there to match.
   unsupported on terrain" warning** we'd already seen on the reachability-circle ellipses —
   benign, the fill still renders and reads fine (used for the highlighted field-boundary
   polygon); harmless console noise, not a rendering bug.
+- **A small `PointGraphics` drag handle sitting on top of a wide `PolylineGraphics` loses the
+  pick to the line, not the point** — the landing-strip's draggable endpoint handles
+  (`pixelSize={10}`) sat directly on the 26px-wide runway polyline; clicking anywhere on the
+  visible runway graphic (not the exact ~5px handle radius) picked the polyline's
+  auto-generated id instead, which isn't in `draggableEntityIds`, so the drag silently fell
+  through to Cesium's default camera-rotate gesture — the strip (and everything downstream
+  computed from it: the whole Downwind/Base/Final/Touchdown pattern) looked like it "wasn't
+  updating" on drag, when actually the drag was never starting at all. Fixed by bumping the
+  handles to `pixelSize={22}` for a pick target that reliably wins. Same root lesson as the
+  heading-handle-overlapping-the-aircraft-icon gotcha above — verify a fix like this by
+  checking whether the *underlying state* actually changed (e.g. the strip's `source`
+  flipping to `'manual'`), not just that a screenshot looks plausible; a picking miss that
+  falls through to native camera panning can look like nothing-happened rather than an
+  error.
 
 ## Cross-project learnings
 
