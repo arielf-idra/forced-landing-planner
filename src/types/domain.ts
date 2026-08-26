@@ -17,6 +17,20 @@ export interface LandingPoint extends LatLon {
   groundElevationMslFt: number
 }
 
+export interface LandingStrip {
+  start: LatLon
+  end: LatLon
+  /** 'detected' — seeded from a Ministry of Agriculture field polygon; 'manual' — no field data found, user-placed default. Either way, both endpoints stay user-draggable. */
+  source: 'detected' | 'manual'
+  fieldInfo?: {
+    cropName?: string
+    category?: string
+    dunam?: number
+  }
+  /** The detected field's polygon boundary, for map highlighting — undefined when `source` is 'manual' (no polygon exists). */
+  fieldRing?: LatLon[]
+}
+
 export interface WindVector {
   /** Wind speed, knots. */
   speedKt: number
@@ -32,10 +46,14 @@ export interface GlideParameters {
 }
 
 export interface ApproachPlan {
-  highKey: LatLon & { altitudeMslFt: number }
-  lowKey: LatLon & { altitudeMslFt: number }
+  /** Abeam touchdown, on the downwind leg. */
+  downwind: LatLon & { altitudeMslFt: number }
+  /** Downwind-to-base turn point (same offset as downwind, but abeam Final). */
   base: LatLon & { altitudeMslFt: number }
+  /** Base-to-final turn point, on the extended centerline. */
   final: LatLon & { altitudeMslFt: number }
+  /** 1/3 of the way along the strip from start to end — leaves margin for undershoot. */
+  touchdown: LatLon & { altitudeMslFt: number }
   /** Landing heading, degrees true — the direction of travel on touchdown. */
   landingHeadingDeg: number
 }

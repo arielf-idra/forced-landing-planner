@@ -29,12 +29,26 @@ plan file if it's not visible in this session; it's not checked into the repo.
   flag if terrain pokes above it. Split across two files: `sampleTerrainProfile` in
   `src/lib/terrain.ts` (Cesium-dependent sampling) produces the profile,
   `checkTerrainClearance` in `src/lib/terrainProfile.ts` (pure, unit-tested) evaluates it.
-- **Approach plan**: classic power-off High Key (overhead landing point, default 1500 ft
-  AGL) / Low Key (abeam threshold, default 800 ft AGL) / base / final. Landing heading
-  defaults to into-wind, editable. Implemented in `src/lib/approach.ts`.
-- Defaults (glide ratio ~9:1, best glide ~65 KIAS) live in `src/lib/geo-constants.ts` and
-  are POH-derived starting points, always user-editable in the UI — never hardcode them
-  elsewhere.
+- **Landing strip detection**: once a landing point is picked, `src/lib/fieldLookup.ts`
+  queries the Israel Ministry of Agriculture's public agricultural-parcel ArcGIS layer for
+  the field polygon at that point (exact point, then a small buffered envelope for a
+  near-miss). `src/lib/landingStrip.ts`'s `estimateStripFromPolygon` (pure, unit-tested)
+  takes the polygon's farthest-apart pair of vertices as the field's long axis, inset 10%
+  from each end. No field found → falls back to a short default manual strip the user drags
+  into place. **Both endpoints are always user-draggable regardless of source** —
+  field-suitability is a pilot judgment call, never fully automated.
+- **Approach plan**: Downwind (1500 ft AGL default, abeam the touchdown point) → Base (1000 ft
+  AGL, on the downwind leg) → Final (500 ft AGL, 500 m before the landing threshold, on the
+  extended centerline) → Touchdown (1/3 of the way along the strip from the threshold — margin
+  for undershoot). Geometry confirmed against a hand-drawn diagram from the user, not a
+  generic rectangular-pattern guess — see `src/lib/approach.ts`'s doc comment for the full
+  derivation. All three altitudes are fixed briefed targets, **not** derived from glide
+  ratio — unlike the reachability circle, this represents a maneuvering descent. Landing
+  heading defaults to whichever of the strip's two directions is closer to into-wind
+  (`defaultLandingHeadingDeg`), editable afterward.
+- Defaults (glide ratio ~9:1, best glide ~65 KIAS, approach altitudes) live in
+  `src/lib/geo-constants.ts` and are starting points, always user-editable in the UI — never
+  hardcode them elsewhere.
 
 Keep `src/lib/*` framework-agnostic (no Cesium imports) — it's the safety-relevant math and
 must stay unit-testable in isolation. Cesium-specific glue (terrain sampling, entity
@@ -52,13 +66,17 @@ rendering) belongs in `src/hooks` and `src/components`.
 
 ```
 src/
-  components/   CesiumMap, EventPointPanel, ParametersPanel, LandingInfoPanel, WindIndicator
-                (ApproachOverlay, SummaryPanel, Legend — Phase 4/5, not built yet)
-  lib/          glide.ts, terrainProfile.ts, geo-constants.ts, units.ts     (pure, tested)
-                terrain.ts, cesiumIonSetup.ts                              (Cesium-dependent glue)
-                (approach.ts — Phase 4, not built yet)
+  components/   CesiumMap, EventPointPanel, ParametersPanel, LandingInfoPanel,
+                ApproachPanel, WindIndicator
+                (SummaryPanel, Legend — Phase 5, not built yet)
+  lib/          glide.ts, terrainProfile.ts, landingStrip.ts, approach.ts,
+                geo.ts, geo-constants.ts, units.ts, runwayTexture.ts         (pure, tested)
+                terrain.ts, cesiumIonSetup.ts, fieldLookup.ts                (Cesium/network-dependent glue)
   types/        domain.ts
 ```
+`geo.ts` holds shared geodesy helpers (`destinationPoint`/`distanceMeters`/`bearingDegrees`,
+thin wrappers over `@turf/*`) — reuse these instead of calling turf directly in new pure-lib
+code, to avoid re-deriving the same `{lon,lat}` ↔ turf-array conversion in every file.
 
 ## Commands
 
@@ -107,7 +125,18 @@ is ever renamed, update `base` there to match.
       `checkTerrainClearance`), landing marker + event↔landing connector line color-coded
       green (reachable and clear) or orange (either check fails). Same click-then-drag
       interaction model as the event point.
-- [ ] Phase 4 — approach plan overlay
+- [x] Phase 4 — landing strip detection + approach plan overlay. `fieldLookup.ts` queries the
+      Israel Ministry of Agriculture ArcGIS parcel layer at the landing point;
+      `estimateStripFromPolygon` derives a draggable strip from the result (or a manual
+      default if no field data). The strip renders as an actual stretchable runway graphic
+      (`runwayTexture.ts`, an `ImageMaterialProperty` on the strip's `PolylineGraphics` —
+      Cesium maps the image along the line's length, so it stretches to fit automatically)
+      plus a highlighted outline of the detected field polygon. `approach.ts` computes the
+      Downwind/Base/Final/Touchdown checkpoints from the strip + landing heading;
+      `ApproachPanel` exposes heading, turn direction, and the altitude/distance defaults.
+      All rendered at absolute altitude with `depthFailMaterial`/`disableDepthTestDistance`
+      per the gotchas below. Verified against real Ministry-of-Agriculture field data in a
+      real browser (both the detected-field and no-field-found/manual paths).
 - [ ] Phase 5 — polish
 
 ### Known gotchas hit so far
@@ -166,16 +195,43 @@ is ever renamed, update `base` there to match.
   distance as a fraction of the reachability circle's own radius
   (`HEADING_HANDLE_DISTANCE_FRACTION`) instead of a fixed feet value — same lesson as the
   original wind-arrow-length choice in Phase 2, just rediscovered the hard way.
+- **Field-boundary data source**: tried OpenStreetMap's Overpass API first for agricultural
+  field polygons — coverage was poor (an exact-point query at a real test coordinate found
+  nothing; a small-radius search mostly surfaced huge administrative/reserve polygons, not
+  individual fields). The Israel Ministry of Agriculture's public "חלקות חקלאיות" ArcGIS
+  FeatureServer (`services3.arcgis.com/.../FeatureServer/0/query`, `f=geojson`,
+  `spatialRel=esriSpatialRelIntersects`, no key needed) returns real individual field
+  polygons with crop/area attributes — verified live via curl and reused directly in
+  `fieldLookup.ts`. Worth checking for an official/government open-data layer before reaching
+  for OSM on anything land-use-specific in Israel.
+- **Agricultural parcel boundaries shift over time** — an exact point that returned a field
+  polygon earlier in the same session later returned nothing at the identical coordinate (a
+  wider radius search still found the same crop nearby, confirming the dataset itself was
+  fine — the parcel boundary had just moved slightly, presumably from a data refresh).
+  `fieldLookup.ts`'s near-miss buffer (~30 m) and the always-available manual-strip fallback
+  exist specifically for this — don't assume a field polygon found once will always be found
+  again at that exact point.
+- **A Cesium `PolylineGraphics` image `material` stretches to fit the line's length** — the
+  U axis maps along the polyline, V across its width — so a single wide texture (the runway
+  graphic in `runwayTexture.ts`) automatically fits whatever length the strip endpoints
+  define, no manual scaling math needed. Same SVG-needs-explicit-`width`/`height` requirement
+  as the billboard icon applies here too.
+- **`PolygonGraphics` with `HeightReference.CLAMP_TO_GROUND` logs the same "outlines are
+  unsupported on terrain" warning** we'd already seen on the reachability-circle ellipses —
+  benign, the fill still renders and reads fine (used for the highlighted field-boundary
+  polygon); harmless console noise, not a rendering bug.
 
 ## Cross-project learnings
 
 [arielf-idra/flight-pattern](https://github.com/arielf-idra/flight-pattern) is a sibling
 Vite + React + Cesium/Resium app (visualizes an airport traffic pattern in 3D, same author,
 same GitHub Pages deployment shape) built and hardened before this one. Worth re-reading its
-`CLAUDE.md` when working on Phase 3/4 here. Uses React 18 / Cesium ~1.121 / Vite 6 vs. this
-repo's React 19 / Cesium ~1.144 / Vite 8 — noticeably older toolchain, so it won't have hit
-issues specific to our newer versions. Lessons pulled from it, organized by what's actually
-ahead of us:
+`CLAUDE.md` before touching the approach-overlay rendering (`App.tsx`'s Downwind/Base/
+Final/Touchdown block) or adding anything that renders geometry at real altitude. Uses React
+18 / Cesium ~1.121 / Vite 6 vs. this repo's React 19 / Cesium ~1.144 / Vite 8 — noticeably
+older toolchain, so it won't have hit issues specific to our newer versions. Lessons pulled
+from it (Phase 3/4 are now built and these were all applied — kept here as the reference for
+why, not as forward-looking guesses):
 
 **Already fixed here, confirmed not a one-off:**
 - The exact same `vite-plugin-cesium` double-base-path asset bug (their
@@ -196,7 +252,7 @@ ahead of us:
 - **Point/label entities need `disableDepthTestDistance={Number.POSITIVE_INFINITY}`** to
   stay visible through terrain — `PointGraphics`, `LabelGraphics`, `BillboardGraphics` all
   support this prop; `PolylineGraphics` does not (use `depthFailMaterial` there instead).
-  Relevant to Phase 4's High Key/Low Key/base/final markers and labels.
+  Used on Phase 4's Downwind/Base/Final/Touchdown markers and labels.
 - **Absolute heights vs. `HeightReference.CLAMP_TO_GROUND`**: our Phase 2 reachability circle
   correctly uses `CLAMP_TO_GROUND` — it represents a footprint *on* the ground. But Phase 3's
   terrain-clearance line and Phase 4's approach-plan legs/markers represent a real altitude
@@ -215,16 +271,16 @@ ahead of us:
   primitive (`intersectLines(p1, bearing1, p2, bearing2)`, infinite bearing-rays not segments
   — `@turf/line-intersect` works on actual segments/strings, which isn't quite the same
   shape) for reconstructing a corner from two fixed headings. Not needed for the currently
-  planned straight-line High Key/Low Key/base/final legs, but relevant if the approach
-  overlay ever wants a corner derived from two heading constraints rather than a plain
-  bearing+distance placement.
+  straight-line Downwind/Base/Final/Touchdown legs we actually built, but relevant if the
+  approach overlay ever wants a corner derived from two heading constraints rather than a
+  plain bearing+distance placement.
 - **Curved turn arcs** (fillet-curve geometry: tangent distance `radius * tan(deflection/2)`
   from a corner along each leg, arc center found via the offset-parallel-lines intersection
   above, tangent heading at any arc point is `bearing ± 90°` from the arc center) are what
   the sibling project uses to make its animated aircraft bank through a real curve instead of
   pivoting at a corner. Speculative for us — only relevant if a future polish pass wants
   curved corners in the approach-plan overlay instead of sharp angles between legs; not
-  needed for the current straight-leg High Key/Low Key/base/final plan.
+  needed for the straight-leg Downwind/Base/Final/Touchdown plan we actually built.
 
 **General resium/Cesium patterns, keep in mind as the scene grows:**
 - resium doesn't wrap everything — `createOsmBuildingsAsync()`, `viewer.scene.primitives`,

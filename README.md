@@ -2,8 +2,8 @@
 
 A web app to help Cessna 172 flight students plan a simulated forced landing (engine-out):
 mark the event point (where the engine "fails"), see how far the aircraft can glide given
-its glide ratio and the wind, pick a landing field, and get a suggested approach (High Key
-/ Low Key pattern).
+its glide ratio and the wind, pick a landing field, get a suggested landing strip within it,
+and get a suggested Downwind/Base/Final approach down to touchdown.
 
 This is a ground-planning / lesson-prep / debrief tool. It runs entirely in the browser —
 no accounts, no server, nothing is saved between sessions.
@@ -11,10 +11,12 @@ no accounts, no server, nothing is saved between sessions.
 **Status: early development.** Working so far: a 3D terrain map, click-to-place the
 engine-failure event point (real terrain elevation, editable heading shown as a Cessna 172
 icon, drag to reposition), a live reachable-glide circle driven by editable glide ratio and
-wind, and picking a landing point with a distance/bearing/in-range readout plus a
-terrain-clearance check along the direct path. The approach-plan overlay (High Key/Low
-Key/base/final) isn't built yet — see [CLAUDE.md](./CLAUDE.md) for the phase-by-phase plan
-and current progress.
+wind, picking a landing point with a distance/bearing/in-range readout plus a
+terrain-clearance check, an auto-suggested landing strip (from real Israeli agricultural
+field-boundary data where available, otherwise drag one out yourself) rendered as a
+stretchable runway graphic, and a Downwind/Base/Final/Touchdown approach plan built from
+that strip. Only polish (Phase 5) is left — see [CLAUDE.md](./CLAUDE.md) for the
+phase-by-phase plan and current progress.
 
 ## Methodology & assumptions
 
@@ -26,6 +28,15 @@ and current progress.
 - **Terrain clearance** between the event point and a candidate landing point is checked
   against a constant-gradient glide path — it will not catch every real-world hazard
   (wires, towers, other obstacles beyond bare terrain).
+- **Landing strip auto-detection** uses Israel's Ministry of Agriculture agricultural-parcel
+  data — coverage isn't complete or perfectly current everywhere, and the suggested strip is
+  a rough estimate (the field polygon's long axis) that says nothing about surface
+  condition, crop height, or obstacles. Always visually verify against the satellite imagery
+  and adjust by dragging — the app never treats this as more than a starting suggestion.
+- **The Downwind/Base/Final/Touchdown altitudes are fixed planning targets**, not something
+  derived from aircraft performance — they represent a maneuvering descent (turns, energy
+  management), not a straight glide, so treat them as briefed checkpoints to fly toward
+  rather than a guaranteed profile.
 - **This is a training aid, not a substitute for your POH, instructor, or judgment.**
   Always cross-check with real performance data and instructor guidance.
 

@@ -1,7 +1,8 @@
-import type { ClearanceCheck } from '../lib/terrainProfile'
-import type { ReachabilityCheck } from '../lib/glide'
 import { FT_PER_NM } from '../lib/geo-constants'
-import type { LandingPoint } from '../types/domain'
+import type { ReachabilityCheck } from '../lib/glide'
+import { stripLengthAndBearing } from '../lib/landingStrip'
+import type { ClearanceCheck } from '../lib/terrainProfile'
+import type { LandingPoint, LandingStrip } from '../types/domain'
 
 interface LandingInfoPanelProps {
   landingPoint: LandingPoint | null
@@ -9,6 +10,8 @@ interface LandingInfoPanelProps {
   reachabilityCheck: ReachabilityCheck | null
   clearanceCheck: ClearanceCheck | null
   isSamplingProfile: boolean
+  landingStrip: LandingStrip | null
+  isLookingUpField: boolean
 }
 
 export function LandingInfoPanel({
@@ -17,6 +20,8 @@ export function LandingInfoPanel({
   reachabilityCheck,
   clearanceCheck,
   isSamplingProfile,
+  landingStrip,
+  isLookingUpField,
 }: LandingInfoPanelProps) {
   return (
     <section className="panel">
@@ -61,6 +66,48 @@ export function LandingInfoPanel({
             </dl>
           )}
           <p className="hint">Drag the marker to reposition it.</p>
+        </>
+      )}
+
+      {(landingStrip || isLookingUpField) && (
+        <>
+          <h2>Landing strip</h2>
+          {isLookingUpField && <p>Checking for field data…</p>}
+          {landingStrip && (
+            <>
+              <dl>
+                <dt>Length / bearing</dt>
+                <dd>
+                  {(() => {
+                    const { lengthFt, bearingDeg } = stripLengthAndBearing(landingStrip)
+                    return `${Math.round(lengthFt).toLocaleString()} ft @ ${Math.round(bearingDeg).toString().padStart(3, '0')}°`
+                  })()}
+                </dd>
+                <dt>Source</dt>
+                <dd>
+                  {landingStrip.source === 'detected'
+                    ? 'Detected from Ministry of Agriculture field data'
+                    : 'No field data found — drag to mark it yourself'}
+                </dd>
+                {landingStrip.fieldInfo?.cropName && (
+                  <>
+                    <dt>Crop</dt>
+                    <dd>
+                      {landingStrip.fieldInfo.cropName}
+                      {landingStrip.fieldInfo.category ? ` (${landingStrip.fieldInfo.category})` : ''}
+                    </dd>
+                  </>
+                )}
+                {landingStrip.fieldInfo?.dunam && (
+                  <>
+                    <dt>Field area</dt>
+                    <dd>{landingStrip.fieldInfo.dunam.toLocaleString()} dunam</dd>
+                  </>
+                )}
+              </dl>
+              <p className="hint">Drag either end to adjust the strip.</p>
+            </>
+          )}
         </>
       )}
     </section>

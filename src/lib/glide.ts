@@ -1,8 +1,6 @@
-import bearing from '@turf/bearing'
-import destination from '@turf/destination'
-import distance from '@turf/distance'
 import type { GlideParameters, LatLon, WindVector } from '../types/domain'
 import { KT_TO_FT_PER_MIN } from './geo-constants'
+import { bearingDegrees, destinationPoint, distanceMeters } from './geo'
 import { feetToMeters, metersToFeet } from './units'
 
 export interface ReachabilityCircle {
@@ -52,15 +50,9 @@ export function computeReachabilityCircle(
   }
 
   const downwindBearingDeg = (wind.directionFromDeg + 180) % 360
-  const shifted = destination(
-    [eventPoint.lon, eventPoint.lat],
-    feetToMeters(driftFt),
-    downwindBearingDeg,
-    { units: 'meters' },
-  )
-  const [lon, lat] = shifted.geometry.coordinates
+  const center = destinationPoint(eventPoint, feetToMeters(driftFt), downwindBearingDeg)
 
-  return { center: { lat, lon }, radiusFt, descentTimeMin }
+  return { center, radiusFt, descentTimeMin }
 }
 
 /** Distance/bearing from the event point plus whether the landing point sits within the reachable circle. */
@@ -69,20 +61,9 @@ export function checkReachability(
   landingPoint: LatLon,
   circle: ReachabilityCircle,
 ): ReachabilityCheck {
-  const distanceFromEventFt = metersToFeet(
-    distance([eventPoint.lon, eventPoint.lat], [landingPoint.lon, landingPoint.lat], {
-      units: 'meters',
-    }),
-  )
-  const bearingFromEventDeg =
-    (bearing([eventPoint.lon, eventPoint.lat], [landingPoint.lon, landingPoint.lat]) + 360) % 360
-
-  const distanceFromCenterFt = metersToFeet(
-    distance([circle.center.lon, circle.center.lat], [landingPoint.lon, landingPoint.lat], {
-      units: 'meters',
-    }),
-  )
-  const marginFt = circle.radiusFt - distanceFromCenterFt
+  const distanceFromEventFt = metersToFeet(distanceMeters(eventPoint, landingPoint))
+  const bearingFromEventDeg = bearingDegrees(eventPoint, landingPoint)
+  const marginFt = circle.radiusFt - metersToFeet(distanceMeters(circle.center, landingPoint))
 
   return {
     distanceFromEventFt,

@@ -10,10 +10,21 @@ export const C172_DEFAULTS = {
   bestGlideSpeedKt: 65,
 } as const
 
-/** Default key-position altitudes for the High Key / Low Key overhead forced-landing pattern. */
+/**
+ * Default targets for the Downwind/Base/Final approach pattern. These are briefed checkpoint
+ * altitudes (a maneuvering descent), not derived from glide ratio the way the reachability
+ * circle is — see `src/lib/approach.ts`.
+ */
 export const APPROACH_DEFAULTS = {
-  highKeyAglFt: 1500,
-  lowKeyAglFt: 800,
+  downwindAglFt: 1500,
+  baseAglFt: 1000,
+  finalAglFt: 500,
+  /** Distance from the strip's start to the Final (base-to-final turn) point. */
+  finalLegDistanceM: 500,
+  /** Lateral offset of the downwind leg from the extended strip centerline. */
+  downwindOffsetFt: 1000,
+  /** Left turns are the default: better outside visual reference for the pilot judging the field during the descending turn. */
+  turnDirection: 'left' as 'left' | 'right',
 } as const
 
 /**
